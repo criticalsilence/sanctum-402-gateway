@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sanctum-402 | Anonymous AI Gateway</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #050505; color: #0f0; padding: 2rem; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 650px; border: 1px solid #333; padding: 25px; border-radius: 8px; background: #111; }
+        h2 { text-align: center; border-bottom: 1px solid #333; padding-bottom: 10px; color: #fff; }
+        label { display: block; margin-top: 15px; color: #888; font-weight: bold; }
+        input, select, textarea { width: 100%; padding: 12px; margin-top: 5px; background: #000; border: 1px solid #444; color: #fff; font-size: 1em; box-sizing: border-box; }
+        button { width: 100%; padding: 15px; margin-top: 20px; background: #0044cc; color: white; border: none; font-weight: bold; cursor: pointer; }
+        button:disabled { background: #333; cursor: not-allowed; }
+        #responseArea { margin-top: 20px; white-space: pre-wrap; padding: 15px; border: 1px dashed #444; min-height: 100px; color: #ddd; background: #0a0a0a; }
+        .status-bar { margin-bottom: 15px; text-align: center; border: 1px solid #333; padding: 5px; color: #ffcc00; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Sanctum-402 /// Gateway</h2>
+    <div id="status" class="status-bar">🔴 Cüzdan Bağlı Değil</div>
+    <button id="connectBtn" onclick="connectWallet()">🦊 Cüzdanı Bağla (Base Sepolia)</button>
+
+    <div id="mainInterface" style="display:none;">
+        <label>🤖 Model Seçimi</label>
+        <select id="modelSelect">
+            <option value="llama-fast">⚡ Llama 3.2 3B (Hızlı) - 0.05 USDC</option>
+            <option value="llama-smart">🧠 Llama 3.3 70B (Akıllı) - 0.20 USDC</option>
+            <option value="uncensored">🐬 Venice Uncensored (Sansürsüz) - 0.50 USDC</option>
+            <option value="premium-405b">🔥 Hermes 3 405B (Premium) - 1.00 USDC</option>
+        </select>
+
+        <label>💬 Prompt</label>
+        <textarea id="promptInput" rows="4" placeholder="AI'ya sor..."></textarea>
+        <button id="payBtn" onclick="payAndChat()">💸 Öde & Çalıştır</button>
+    </div>
+
+    <label>📠 Sistem Yanıtı:</label>
+    <div id="responseArea">...</div>
+</div>
+
+<script>
+    let provider, signer, userAddress;
+    const CHAIN_ID = "0x14a34"; 
+    const USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+    const MERCHANT_ADDRESS = "0x5f57a6901eb2d37CC35c6a9cb6AAd35D004902d5"; 
+
+    // Backend Key'leri ile AYNI
+    const PRICES = { 
+        "llama-fast": "0.05", 
+        "llama-smart": "0.20",
+        "uncensored": "0.50",
+        "premium-405b": "1.00"
+    };
+
+    const ERC20_ABI = ["function transfer(address to, uint amount) returns (bool)"];
+
+    async function connectWallet() {
+        if (!window.ethereum) return alert("Metamask gerekli!");
+        provider = new ethers.BrowserProvider(window.ethereum);
+        try {
+            await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_ID }] });
+            signer = await provider.getSigner();
+            userAddress = await signer.getAddress();
+            document.getElementById("status").innerText = "🟢 Bağlı: " + userAddress.slice(0,6) + "...";
+            document.getElementById("status").style.color = "#0f0";
+            document.getElementById("connectBtn").style.display = "none";
+            document.getElementById("mainInterface").style.display = "block";
+        } catch (e) { alert(e.message); }
+    }
+
+    async function payAndChat() {
+        const payBtn = document.getElementById("payBtn");
+        const responseArea = document.getElementById("responseArea");
+        payBtn.disabled = true; payBtn.innerText = "⏳ Cüzdan Onayı Bekleniyor...";
+        
+        try {
+            const model = document.getElementById("modelSelect").value;
+            const prompt = document.getElementById("promptInput").value;
+            const price = PRICES[model];
+            
+            const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+            const amountWei = ethers.parseUnits(price, 6);
+
+            const tx = await usdcContract.transfer(MERCHANT_ADDRESS, amountWei);
+            responseArea.innerText = "⏳ İşlem ağa gönderildi. Onay bekleniyor...";
+            
+            await tx.wait(1); // 1 Blok onayı bekle
+
+            responseArea.innerText = "✅ Ödeme Onaylandı! AI Yanıtlıyor...";
+
+            const res = await fetch('/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], txHash: tx.hash })
+            });
+
+            const data = await res.json();
+            
+            if (res.status === 402) {
+                responseArea.innerText = "⛔ Ödeme Hatası: " + data.message;
+            } else if (data.error) {
+                responseArea.innerText = "⚠️ API Hatası: " + JSON.stringify(data);
+            } else {
+                responseArea.innerText = data.choices[0].message.content;
+            }
+        } catch (error) {
+            responseArea.innerText = "❌ HATA: " + error.message;
+        } finally {
+            payBtn.disabled = false; payBtn.innerText = "💸 Öde & Çalıştır";
+        }
+    }
+</script>
+</body>
+</html>
